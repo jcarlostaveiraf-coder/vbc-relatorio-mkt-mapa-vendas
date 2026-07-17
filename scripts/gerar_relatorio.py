@@ -71,8 +71,10 @@ def buscar_nfe_mes():
                 "pagina": pagina,
                 "registros_por_pagina": 50,
                 "apenas_importado_api": "N",
-                "dDataEmissaoDe": inicio.strftime("%d/%m/%Y"),
-                "dDataEmissaoAte": hoje.strftime("%d/%m/%Y"),
+                - "dDataEmissaoDe": inicio.strftime("%d/%m/%Y"),
+- "dDataEmissaoAte": hoje.strftime("%d/%m/%Y"),
++ "dEmiInicial": inicio.strftime("%d/%m/%Y"),
++ "dEmiFinal": hoje.strftime("%d/%m/%Y"),
             }],
         }
         r = requests.post("https://app.omie.com.br/api/v1/produtos/nfconsultar/", json=payload, timeout=30)
