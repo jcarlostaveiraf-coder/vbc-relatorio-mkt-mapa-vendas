@@ -1,0 +1,31 @@
+name: Relatório semanal de vendas por estado
+
+on:
+  schedule:
+    - cron: '0 11 * * 1'   # toda segunda-feira, 08h horário de Brasília (11h UTC)
+  workflow_dispatch: {}     # permite rodar manualmente pelo botão "Run workflow"
+
+jobs:
+  enviar-relatorio:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependências
+        run: |
+          pip install requests pandas geopandas matplotlib
+
+      - name: Executar relatório
+        env:
+          OMIE_APP_KEY: ${{ secrets.OMIE_APP_KEY }}
+          OMIE_APP_SECRET: ${{ secrets.OMIE_APP_SECRET }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          DESTINATARIOS: ${{ secrets.DESTINATARIOS }}
+        run: python scripts/gerar_relatorio.py
