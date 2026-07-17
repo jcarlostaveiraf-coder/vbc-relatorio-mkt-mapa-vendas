@@ -16,16 +16,26 @@
 # Secrets esperados no repositorio:
 #   OMIE_APP_KEY, OMIE_APP_SECRET, GMAIL_USER, GMAIL_APP_PASSWORD, DESTINATARIOS
 
+print("=== INICIO DO SCRIPT ===", flush=True)
 import os
 import smtplib
 import requests
+print("✓ requests importado", flush=True)
 import pandas as pd
-import geopandas as gpd
+print("✓ pandas importado", flush=True)
+try:
+    import geopandas as gpd
+    print("✓ geopandas importado", flush=True)
+except Exception as e:
+    print(f"✗ ERRO ao importar geopandas: {e}", flush=True)
+    raise
 import matplotlib.pyplot as plt
+print("✓ matplotlib importado", flush=True)
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.image import MIMEImage
 from datetime import datetime
+print("✓ todos os imports OK", flush=True)
 
 OMIE_APP_KEY = os.environ["OMIE_APP_KEY"]
 OMIE_APP_SECRET = os.environ["OMIE_APP_SECRET"]
@@ -36,7 +46,7 @@ DESTINATARIOS = [e.strip() for e in os.environ["DESTINATARIOS"].split(",")]
 CFOPS_VENDA = {"5101", "5102", "6101", "6102", "7101", "7102"}
 MALHA_IBGE_URL = (
     "https://servicodados.ibge.gov.br/api/v3/malhas/paises/BR"
-    "?formato=application/vnd.geo+json&resolucao=2&qualidade=3"
+    "?intrarregiao=UF&formato=application/vnd.geo+json"
 )
 CODIGOS_UF = {
     "RO": "11", "AC": "12", "AM": "13", "RR": "14", "PA": "15", "AP": "16", "TO": "17",
@@ -300,11 +310,14 @@ def enviar_email(html, imagens):
 
 # ---------- Main ----------
 if __name__ == "__main__":
-    hoje = datetime.now()
-    inicio = hoje.replace(day=1)
-    periodo_str = f"{inicio.strftime('%d/%m/%Y')} a {hoje.strftime('%d/%m/%Y')} (acumulado do mês)"
+    try:
+        print("=== INICIANDO MAIN ===", flush=True)
+        hoje = datetime.now()
+        inicio = hoje.replace(day=1)
+        periodo_str = f"{inicio.strftime('%d/%m/%Y')} a {hoje.strftime('%d/%m/%Y')} (acumulado do mês)"
+        print(f"Período: {periodo_str}", flush=True)
 
-    notas = buscar_nfe_mes()
+        notas = buscar_nfe_mes()
     print(f"DEBUG - total de notas retornadas pela Omie: {len(notas)}")
     if notas:
         print(f"DEBUG - chaves da primeira nota: {list(notas[0].keys())}")
@@ -335,4 +348,8 @@ if __name__ == "__main__":
 
         html = montar_html(total, periodo_str, ticket_uf, sem_venda, pct_top5, pct_sudeste)
         enviar_email(html, imagens)
-        print("Relatório enviado com sucesso.")
+        print("Relatório enviado com sucesso.", flush=True)
+    except Exception as e:
+        import traceback
+        print(f"\n✗ ERRO NO SCRIPT: {e}", flush=True)
+        print(traceback.format_exc(), flush=True)
