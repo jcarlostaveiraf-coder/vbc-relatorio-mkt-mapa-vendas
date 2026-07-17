@@ -36,7 +36,7 @@ DESTINATARIOS = [e.strip() for e in os.environ["DESTINATARIOS"].split(",")]
 CFOPS_VENDA = {"5101", "5102", "6101", "6102", "7101", "7102"}
 MALHA_IBGE_URL = (
     "https://servicodados.ibge.gov.br/api/v3/malhas/paises/BR"
-    "?intrarregiao=UF&formato=application/vnd.geo+json&qualidade=intermediaria"
+    "?formato=application/vnd.geo+json&resolucao=2&qualidade=3"
 )
 CODIGOS_UF = {
     "RO": "11", "AC": "12", "AM": "13", "RR": "14", "PA": "15", "AP": "16", "TO": "17",
@@ -176,7 +176,16 @@ def evolucao_acumulada(df):
 
 # ---------- 3. Gráficos (PNG para embutir no e-mail) ----------
 def gerar_mapa(df_uf, caminho="mapa_vendas.png"):
-    malha = gpd.read_file(MALHA_IBGE_URL)
+    r = requests.get(MALHA_IBGE_URL, timeout=60)
+    r.raise_for_status()
+    try:
+        geojson_data = r.json()
+    except ValueError as e:
+        raise RuntimeError(
+            f"IBGE nao retornou GeoJSON valido (content-type: {r.headers.get('content-type')}). "
+            f"Primeiros 300 chars: {r.text[:300]}"
+        ) from e
+    malha = gpd.GeoDataFrame.from_features(geojson_data["features"])
     df_uf = df_uf.copy()
     df_uf["codarea"] = df_uf["uf"].map(CODIGOS_UF)
     malha = malha.merge(df_uf, on="codarea", how="left")
