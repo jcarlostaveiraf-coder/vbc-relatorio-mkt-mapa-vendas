@@ -175,32 +175,6 @@ def evolucao_acumulada(df):
 
 
 # ---------- 3. Gráficos (PNG para embutir no e-mail) ----------
-_cache_uf_cliente = {}
-
-
-def buscar_uf_cliente(codigo_cliente_omie):
-    """Consulta a UF do cliente via ConsultarCliente, com cache (o ListarNF não traz endereço)."""
-    if not codigo_cliente_omie:
-        return ""
-    if codigo_cliente_omie in _cache_uf_cliente:
-        return _cache_uf_cliente[codigo_cliente_omie]
-    payload = {
-        "call": "ConsultarCliente",
-        "app_key": OMIE_APP_KEY,
-        "app_secret": OMIE_APP_SECRET,
-        "param": [{"codigo_cliente_omie": codigo_cliente_omie}],
-    }
-    try:
-        r = requests.post("https://app.omie.com.br/api/v1/geral/clientes/", json=payload, timeout=30)
-        r.raise_for_status()
-        uf = r.json().get("estado", "")
-    except Exception as e:
-        print(f"DEBUG - falha ao consultar UF do cliente {codigo_cliente_omie}: {e}")
-        uf = ""
-    _cache_uf_cliente[codigo_cliente_omie] = uf
-    return uf
-
-
 def gerar_mapa(df_uf, caminho="mapa_vendas.png"):
     r = requests.get(MALHA_IBGE_URL, timeout=60)
     r.raise_for_status()
@@ -216,3 +190,149 @@ def gerar_mapa(df_uf, caminho="mapa_vendas.png"):
     df_uf["codarea"] = df_uf["uf"].map(CODIGOS_UF)
     malha = malha.merge(df_uf, on="codarea", how="left")
     malha["valor"] = malha["valor"].fillna(0)
+
+    fig, ax = plt.subplots(figsize=(7, 7))
+    malha.plot(column="valor", cmap="Blues", linewidth=0.6, edgecolor="white",
+               legend=True, ax=ax, missing_kwds={"color": "#f1f5f9"})
+    ax.set_axis_off()
+    ax.set_title("Vendas por estado - acumulado do mês", fontsize=13, loc="left")
+    plt.savefig(caminho, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return caminho
+
+
+def gerar_grafico_abc(top, caminho="curva_abc.png"):
+    fig, ax = plt.subplots(figsize=(6, 3.5))
+    ax.barh(top["cliente"], top["valor"], color="#0c447c")
+    ax.invert_yaxis()
+    ax.set_title("Top 5 clientes do mês", fontsize=12, loc="left")
+    ax.set_xlabel("R$")
+    plt.tight_layout()
+    plt.savefig(caminho, dpi=150)
+    plt.close(fig)
+    return caminho
+
+
+def gerar_grafico_regional(por_regiao, caminho="regional.png"):
+    fig, ax = plt.subplots(figsize=(6, 2.2))
+    cores = ["#0c447c" if r == "Sudeste" else "#b0c6db" for r in por_regiao.index]
+    ax.barh(por_regiao.index, por_regiao.values, color=cores)
+    ax.set_title("Faturamento por região", fontsize=12, loc="left")
+    ax.set_xlabel("R$")
+    plt.tight_layout()
+    plt.savefig(caminho, dpi=150)
+    plt.close(fig)
+    return caminho
+
+
+def gerar_grafico_evolucao(cumsum, caminho="evolucao.png"):
+    fig, ax = plt.subplots(figsize=(6, 3))
+    ax.plot(cumsum.index, cumsum.values, color="#0c447c", linewidth=2)
+    ax.fill_between(cumsum.index, cumsum.values, color="#0c447c", alpha=0.08)
+    ax.set_title("Faturamento acumulado no mês", fontsize=12, loc="left")
+    ax.set_ylabel("R$ acumulado")
+    fig.autofmt_xdate()
+    plt.tight_layout()
+    plt.savefig(caminho, dpi=150)
+    plt.close(fig)
+    return caminho
+
+
+# ---------- 4. E-mail ----------
+def montar_html(total, periodo_str, ticket_uf, sem_venda, pct_top5, pct_sudeste):
+    linhas_ticket = "".join(
+        f"<tr><td style='padding:4px 12px;'>{r.uf}</td>"
+        f"<td style='padding:4px 12px;text-align:right;'>R$ {r.ticket_medio:,.2f}</td>"
+        f"<td style='padding:4px 12px;text-align:right;color:#888;'>{int(r.count)} notas</td></tr>"
+        for r in ticket_uf.itertuples()
+    )
+    sem_venda_str = ", ".join(sem_venda) if sem_venda else "nenhum — todos os estados com histórico compraram este mês"
+
+    return f"""
+    <html><body style="font-family:Arial,sans-serif;color:#111;max-width:600px;">
+      <h2>Relatório semanal de vendas por estado</h2>
+      <p style="color:#555;">Período: {periodo_str}</p>
+      <p><b>Total faturado:</b> R$ {total:,.2f}</p>
+
+      <img src="cid:mapa_vendas" style="max-width:480px;display:block;margin:16px 0;" />
+
+      <img src="cid:curva_abc" style="max-width:480px;display:block;margin:16px 0;" />
+      <p style="font-size:13px;color:#555;">Os 5 maiores clientes respondem por {pct_top5:.1f}% do faturamento do mês.</p>
+
+      <img src="cid:regional" style="max-width:480px;display:block;margin:16px 0;" />
+      <p style="font-size:13px;color:#555;">Sudeste concentra {pct_sudeste:.1f}% do faturamento do mês.</p>
+
+      <img src="cid:evolucao" style="max-width:480px;display:block;margin:16px 0;" />
+
+      <hr style="border:none;border-top:1px solid #eee;margin:24px 0;" />
+
+      <p style="font-size:13px;font-weight:bold;">Ticket médio por UF</p>
+      <table style="border-collapse:collapse;font-size:13px;">
+        <tr><th style="text-align:left;padding:4px 12px;">UF</th><th style="text-align:right;padding:4px 12px;">Ticket médio</th><th></th></tr>
+        {linhas_ticket}
+      </table>
+
+      <p style="font-size:13px;font-weight:bold;margin-top:16px;">Estados sem venda este mês</p>
+      <p style="font-size:13px;color:#555;">{sem_venda_str}</p>
+    </body></html>
+    """
+
+
+def enviar_email(html, imagens):
+    # imagens: dict {content_id: caminho_arquivo}
+    msg = MIMEMultipart("related")
+    msg["Subject"] = f"Relatório semanal de vendas por estado - {datetime.now().strftime('%d/%m/%Y')}"
+    msg["From"] = GMAIL_USER
+    msg["To"] = ", ".join(DESTINATARIOS)
+    msg.attach(MIMEText(html, "html"))
+
+    for cid, caminho in imagens.items():
+        with open(caminho, "rb") as f:
+            img = MIMEImage(f.read())
+            img.add_header("Content-ID", f"<{cid}>")
+            msg.attach(img)
+
+    with smtplib.SMTP("smtp.gmail.com", 587) as server:
+        server.starttls()
+        server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
+        server.sendmail(GMAIL_USER, DESTINATARIOS, msg.as_string())
+
+
+# ---------- Main ----------
+if __name__ == "__main__":
+    hoje = datetime.now()
+    inicio = hoje.replace(day=1)
+    periodo_str = f"{inicio.strftime('%d/%m/%Y')} a {hoje.strftime('%d/%m/%Y')} (acumulado do mês)"
+
+    notas = buscar_nfe_mes()
+    print(f"DEBUG - total de notas retornadas pela Omie: {len(notas)}")
+    if notas:
+        print(f"DEBUG - chaves da primeira nota: {list(notas[0].keys())}")
+        print(f"DEBUG - conteudo da primeira nota: {notas[0]}")
+    df = filtrar_notas(notas)
+    print(f"DEBUG - notas de venda apos filtro CFOP/cancelamento: {len(df)}")
+    if not df.empty:
+        print(f"DEBUG - notas sem UF (falha na consulta ConsultarCliente): {(df['uf'] == '').sum()}")
+
+    if df.empty:
+        print("Nenhuma venda encontrada no mês. E-mail não enviado.")
+    else:
+        df_uf = agregar_por_uf(df)
+        total = df_uf["valor"].sum()
+
+        top5, pct_top5 = curva_abc(df)
+        ticket_uf = ticket_medio_por_uf(df)
+        sem_venda = estados_sem_venda(df_uf)
+        por_regiao, pct_sudeste = concentracao_regional(df_uf)
+        cumsum = evolucao_acumulada(df)
+
+        imagens = {
+            "mapa_vendas": gerar_mapa(df_uf),
+            "curva_abc": gerar_grafico_abc(top5),
+            "regional": gerar_grafico_regional(por_regiao),
+            "evolucao": gerar_grafico_evolucao(cumsum),
+        }
+
+        html = montar_html(total, periodo_str, ticket_uf, sem_venda, pct_top5, pct_sudeste)
+        enviar_email(html, imagens)
+        print("Relatório enviado com sucesso.")

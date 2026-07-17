@@ -17,9 +17,15 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Instalar dependências
-        run: |
-          pip install requests pandas geopandas matplotlib
+      - name: Instalar dependências do sistema
+  run: |
+    sudo apt-get update
+    sudo apt-get install -y gdal-bin libgdal-dev libproj-dev proj-data
+
+- name: Instalar dependências Python
+  run: |
+    pip install --upgrade pip setuptools wheel
+    pip install requests pandas geopandas matplotlib
 
       - name: Executar relatório
         env:
