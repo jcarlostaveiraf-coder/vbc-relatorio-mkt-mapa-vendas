@@ -318,37 +318,37 @@ if __name__ == "__main__":
         print(f"Período: {periodo_str}", flush=True)
 
         notas = buscar_nfe_mes()
-    print(f"DEBUG - total de notas retornadas pela Omie: {len(notas)}")
-    if notas:
-        print(f"DEBUG - chaves da primeira nota: {list(notas[0].keys())}")
-        print(f"DEBUG - conteudo da primeira nota: {notas[0]}")
-    df = filtrar_notas(notas)
-    print(f"DEBUG - notas de venda apos filtro CFOP/cancelamento: {len(df)}")
-    if not df.empty:
-        print(f"DEBUG - notas sem UF (falha na consulta ConsultarCliente): {(df['uf'] == '').sum()}")
+        print(f"DEBUG - total de notas retornadas pela Omie: {len(notas)}")
+        if notas:
+            print(f"DEBUG - chaves da primeira nota: {list(notas[0].keys())}")
+            print(f"DEBUG - conteudo da primeira nota: {notas[0]}")
+        df = filtrar_notas(notas)
+        print(f"DEBUG - notas de venda apos filtro CFOP/cancelamento: {len(df)}")
+        if not df.empty:
+            print(f"DEBUG - notas sem UF (falha na consulta ConsultarCliente): {(df['uf'] == '').sum()}")
 
-    if df.empty:
-        print("Nenhuma venda encontrada no mês. E-mail não enviado.")
-    else:
-        df_uf = agregar_por_uf(df)
-        total = df_uf["valor"].sum()
+        if df.empty:
+            print("Nenhuma venda encontrada no mês. E-mail não enviado.")
+        else:
+            df_uf = agregar_por_uf(df)
+            total = df_uf["valor"].sum()
 
-        top5, pct_top5 = curva_abc(df)
-        ticket_uf = ticket_medio_por_uf(df)
-        sem_venda = estados_sem_venda(df_uf)
-        por_regiao, pct_sudeste = concentracao_regional(df_uf)
-        cumsum = evolucao_acumulada(df)
+            top5, pct_top5 = curva_abc(df)
+            ticket_uf = ticket_medio_por_uf(df)
+            sem_venda = estados_sem_venda(df_uf)
+            por_regiao, pct_sudeste = concentracao_regional(df_uf)
+            cumsum = evolucao_acumulada(df)
 
-        imagens = {
-            "mapa_vendas": gerar_mapa(df_uf),
-            "curva_abc": gerar_grafico_abc(top5),
-            "regional": gerar_grafico_regional(por_regiao),
-            "evolucao": gerar_grafico_evolucao(cumsum),
-        }
+            imagens = {
+                "mapa_vendas": gerar_mapa(df_uf),
+                "curva_abc": gerar_grafico_abc(top5),
+                "regional": gerar_grafico_regional(por_regiao),
+                "evolucao": gerar_grafico_evolucao(cumsum),
+            }
 
-        html = montar_html(total, periodo_str, ticket_uf, sem_venda, pct_top5, pct_sudeste)
-        enviar_email(html, imagens)
-        print("Relatório enviado com sucesso.", flush=True)
+            html = montar_html(total, periodo_str, ticket_uf, sem_venda, pct_top5, pct_sudeste)
+            enviar_email(html, imagens)
+            print("Relatório enviado com sucesso.", flush=True)
     except Exception as e:
         import traceback
         print(f"\n✗ ERRO NO SCRIPT: {e}", flush=True)
