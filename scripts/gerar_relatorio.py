@@ -16,26 +16,16 @@
 # Secrets esperados no repositorio:
 #   OMIE_APP_KEY, OMIE_APP_SECRET, GMAIL_USER, GMAIL_APP_PASSWORD, DESTINATARIOS
 
-print("=== INICIO DO SCRIPT ===", flush=True)
 import os
 import smtplib
 import requests
-print("✓ requests importado", flush=True)
 import pandas as pd
-print("✓ pandas importado", flush=True)
-try:
-    import geopandas as gpd
-    print("✓ geopandas importado", flush=True)
-except Exception as e:
-    print(f"✗ ERRO ao importar geopandas: {e}", flush=True)
-    raise
+import geopandas as gpd
 import matplotlib.pyplot as plt
-print("✓ matplotlib importado", flush=True)
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.image import MIMEImage
 from datetime import datetime
-print("✓ todos os imports OK", flush=True)
 
 OMIE_APP_KEY = os.environ["OMIE_APP_KEY"]
 OMIE_APP_SECRET = os.environ["OMIE_APP_SECRET"]
@@ -46,7 +36,7 @@ DESTINATARIOS = [e.strip() for e in os.environ["DESTINATARIOS"].split(",")]
 CFOPS_VENDA = {"5101", "5102", "6101", "6102", "7101", "7102"}
 MALHA_IBGE_URL = (
     "https://servicodados.ibge.gov.br/api/v3/malhas/paises/BR"
-    "?intrarregiao=UF&formato=application/vnd.geo+json"
+    "?intrarregiao=UF&formato=application/vnd.geo+json&qualidade=intermediaria"
 )
 CODIGOS_UF = {
     "RO": "11", "AC": "12", "AM": "13", "RR": "14", "PA": "15", "AP": "16", "TO": "17",
@@ -81,8 +71,8 @@ def buscar_nfe_mes():
                 "pagina": pagina,
                 "registros_por_pagina": 50,
                 "apenas_importado_api": "N",
-                "dEmiInicial": inicio.strftime("%d/%m/%Y"),
-                "dEmiFinal": hoje.strftime("%d/%m/%Y"),
+                "dDataEmissaoDe": inicio.strftime("%d/%m/%Y"),
+                "dDataEmissaoAte": hoje.strftime("%d/%m/%Y"),
             }],
         }
         r = requests.post("https://app.omie.com.br/api/v1/produtos/nfconsultar/", json=payload, timeout=30)
@@ -98,47 +88,21 @@ def buscar_nfe_mes():
     return notas
 
 
-_cache_uf_cliente = {}
-
-
-def buscar_uf_cliente(codigo_cliente_omie):
-    """Consulta a UF do cliente via ConsultarCliente, com cache (o ListarNF não traz endereço)."""
-    if not codigo_cliente_omie:
-        return ""
-    if codigo_cliente_omie in _cache_uf_cliente:
-        return _cache_uf_cliente[codigo_cliente_omie]
-    payload = {
-        "call": "ConsultarCliente",
-        "app_key": OMIE_APP_KEY,
-        "app_secret": OMIE_APP_SECRET,
-        "param": [{"codigo_cliente_omie": codigo_cliente_omie}],
-    }
-    try:
-        r = requests.post("https://app.omie.com.br/api/v1/geral/clientes/", json=payload, timeout=30)
-        r.raise_for_status()
-        uf = r.json().get("estado", "")
-    except Exception as e:
-        print(f"DEBUG - falha ao consultar UF do cliente {codigo_cliente_omie}: {e}")
-        uf = ""
-    _cache_uf_cliente[codigo_cliente_omie] = uf
-    return uf
-
-
 def filtrar_notas(notas):
     """Retorna um DataFrame linha-a-linha: uf, cliente, valor, data. Base para todos os insights."""
     linhas = []
     for nf in notas:
-        ide = nf.get("ide", {})
-        if ide.get("dCan"):
+        compl = nf.get("compl", {})
+        if compl.get("dCan"):
             continue
-        cfop = str(nf.get("det", [{}])[0].get("prod", {}).get("CFOP", "")).replace(".", "")
+        cfop = str(nf.get("det", [{}])[0].get("prod", {}).get("cfop", ""))
         if cfop not in CFOPS_VENDA:
             continue
-        dest_int = nf.get("nfDestInt", {})
-        codigo_cliente = dest_int.get("nCodCli")
+        dest = nf.get("dest", {})
+        ide = nf.get("ide", {})
         linhas.append({
-            "uf": buscar_uf_cliente(codigo_cliente),
-            "cliente": dest_int.get("cRazao", "Não identificado"),
+            "uf": dest.get("UF", ""),
+            "cliente": dest.get("xNome", "Não identificado"),
             "valor": float(nf.get("total", {}).get("ICMSTot", {}).get("vNF", 0)),
             "data": pd.to_datetime(ide.get("dEmi", ""), format="%d/%m/%Y", errors="coerce"),
         })
@@ -186,16 +150,7 @@ def evolucao_acumulada(df):
 
 # ---------- 3. Gráficos (PNG para embutir no e-mail) ----------
 def gerar_mapa(df_uf, caminho="mapa_vendas.png"):
-    r = requests.get(MALHA_IBGE_URL, timeout=60)
-    r.raise_for_status()
-    try:
-        geojson_data = r.json()
-    except ValueError as e:
-        raise RuntimeError(
-            f"IBGE nao retornou GeoJSON valido (content-type: {r.headers.get('content-type')}). "
-            f"Primeiros 300 chars: {r.text[:300]}"
-        ) from e
-    malha = gpd.GeoDataFrame.from_features(geojson_data["features"])
+    malha = gpd.read_file(MALHA_IBGE_URL)
     df_uf = df_uf.copy()
     df_uf["codarea"] = df_uf["uf"].map(CODIGOS_UF)
     malha = malha.merge(df_uf, on="codarea", how="left")
@@ -310,46 +265,32 @@ def enviar_email(html, imagens):
 
 # ---------- Main ----------
 if __name__ == "__main__":
-    try:
-        print("=== INICIANDO MAIN ===", flush=True)
-        hoje = datetime.now()
-        inicio = hoje.replace(day=1)
-        periodo_str = f"{inicio.strftime('%d/%m/%Y')} a {hoje.strftime('%d/%m/%Y')} (acumulado do mês)"
-        print(f"Período: {periodo_str}", flush=True)
+    hoje = datetime.now()
+    inicio = hoje.replace(day=1)
+    periodo_str = f"{inicio.strftime('%d/%m/%Y')} a {hoje.strftime('%d/%m/%Y')} (acumulado do mês)"
 
-        notas = buscar_nfe_mes()
-        print(f"DEBUG - total de notas retornadas pela Omie: {len(notas)}")
-        if notas:
-            print(f"DEBUG - chaves da primeira nota: {list(notas[0].keys())}")
-            print(f"DEBUG - conteudo da primeira nota: {notas[0]}")
-        df = filtrar_notas(notas)
-        print(f"DEBUG - notas de venda apos filtro CFOP/cancelamento: {len(df)}")
-        if not df.empty:
-            print(f"DEBUG - notas sem UF (falha na consulta ConsultarCliente): {(df['uf'] == '').sum()}")
+    notas = buscar_nfe_mes()
+    df = filtrar_notas(notas)
 
-        if df.empty:
-            print("Nenhuma venda encontrada no mês. E-mail não enviado.")
-        else:
-            df_uf = agregar_por_uf(df)
-            total = df_uf["valor"].sum()
+    if df.empty:
+        print("Nenhuma venda encontrada no mês. E-mail não enviado.")
+    else:
+        df_uf = agregar_por_uf(df)
+        total = df_uf["valor"].sum()
 
-            top5, pct_top5 = curva_abc(df)
-            ticket_uf = ticket_medio_por_uf(df)
-            sem_venda = estados_sem_venda(df_uf)
-            por_regiao, pct_sudeste = concentracao_regional(df_uf)
-            cumsum = evolucao_acumulada(df)
+        top5, pct_top5 = curva_abc(df)
+        ticket_uf = ticket_medio_por_uf(df)
+        sem_venda = estados_sem_venda(df_uf)
+        por_regiao, pct_sudeste = concentracao_regional(df_uf)
+        cumsum = evolucao_acumulada(df)
 
-            imagens = {
-                "mapa_vendas": gerar_mapa(df_uf),
-                "curva_abc": gerar_grafico_abc(top5),
-                "regional": gerar_grafico_regional(por_regiao),
-                "evolucao": gerar_grafico_evolucao(cumsum),
-            }
+        imagens = {
+            "mapa_vendas": gerar_mapa(df_uf),
+            "curva_abc": gerar_grafico_abc(top5),
+            "regional": gerar_grafico_regional(por_regiao),
+            "evolucao": gerar_grafico_evolucao(cumsum),
+        }
 
-            html = montar_html(total, periodo_str, ticket_uf, sem_venda, pct_top5, pct_sudeste)
-            enviar_email(html, imagens)
-            print("Relatório enviado com sucesso.", flush=True)
-    except Exception as e:
-        import traceback
-        print(f"\n✗ ERRO NO SCRIPT: {e}", flush=True)
-        print(traceback.format_exc(), flush=True)
+        html = montar_html(total, periodo_str, ticket_uf, sem_venda, pct_top5, pct_sudeste)
+        enviar_email(html, imagens)
+        print("Relatório enviado com sucesso.")
